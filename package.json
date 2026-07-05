@@ -1,0 +1,55 @@
+{
+  "name": "genforge",
+  "version": "0.0.0",
+  "description": "Spend-aware durable steps for paid AI APIs — priced before it runs, recorded forever, resumable after a crash, blockable by budget or human review. Zero infra: one SQLite file.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./adapters/fal": "./src/adapters/fal.ts",
+    "./adapters/replicate": "./src/adapters/replicate.ts",
+    "./adapters/openai": "./src/adapters/openai.ts",
+    "./adapters/fake": "./src/adapters/fake.ts"
+  },
+  "bin": {
+    "genforge": "./bin/genforge.ts"
+  },
+  "files": [
+    "src",
+    "bin",
+    "ui",
+    "README.md"
+  ],
+  "scripts": {
+    "check": "ultracite check",
+    "fix": "ultracite fix",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "dev": "bun ui/server.ts",
+    "prepare": "husky"
+  },
+  "keywords": [
+    "ai",
+    "generative",
+    "fal",
+    "replicate",
+    "durable",
+    "workflow",
+    "budget",
+    "human-in-the-loop",
+    "cost-tracking",
+    "sqlite",
+    "bun"
+  ],
+  "engines": {
+    "bun": ">=1.1.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.2",
+    "@types/bun": "latest",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.8",
+    "typescript": "^6.0.3",
+    "ultracite": "7.9.0"
+  }
+}
