@@ -9,7 +9,16 @@
       "performance": {
         // this library is a polling loop by design (queue-based providers,
         // gate verdicts) — sequential awaits in loops are the point
-        "noAwaitInLoops": "off"
+        "noAwaitInLoops": "off",
+        // src/index.ts is the package entrypoint: a deliberate, curated
+        // public API surface, not an accidental barrel
+        "noBarrelFile": "off"
+      },
+      "style": {
+        // this codebase standardizes on `type` (unions + objects, one keyword)
+        "useConsistentTypeDefinitions": "off",
+        // idiomatic for typed error classes carrying structured fields
+        "noParameterProperties": "off"
       }
     }
   }
