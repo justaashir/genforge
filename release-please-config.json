@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "packages": {
+    ".": {
+      "release-type": "node",
+      "changelog-sections": [
+        { "section": "Features", "type": "feat" },
+        { "section": "Bug Fixes", "type": "fix" },
+        { "section": "Performance", "type": "perf" },
+        { "hidden": true, "type": "chore" },
+        { "hidden": true, "type": "test" },
+        { "hidden": true, "type": "ci" }
+      ]
+    }
+  }
+}
