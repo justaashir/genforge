@@ -6,15 +6,25 @@ export type ProviderOutput = {
   contentType?: string;
 };
 
+/**
+ * Actual billed usage, when the provider reports it (Replicate's
+ * metrics.predict_time, token counts, …). Confirmed cost becomes usdActual
+ * instead of the upfront estimate; the reservation difference is released.
+ */
+export type ActualUsage = {
+  usdActual?: number;
+  units?: number;
+};
+
 export type SubmitResult =
   /** Sync providers (OpenAI images/TTS): the call either landed or it didn't. */
-  | { kind: "done"; output: ProviderOutput }
+  | { kind: "done"; output: ProviderOutput; usage?: ActualUsage }
   /** Async queue providers (fal, Replicate): jobId is the crash-safe resume handle. */
   | { kind: "job"; jobId: string };
 
 export type PollResult =
   | { status: "running" }
-  | { status: "done"; output: ProviderOutput };
+  | { status: "done"; output: ProviderOutput; usage?: ActualUsage };
 
 export type ResolvedPrice = {
   usdPerUnit: number;

@@ -1,4 +1,4 @@
-import type { Adapter, ProviderOutput } from "./adapters/types";
+import type { ActualUsage, Adapter, ProviderOutput } from "./adapters/types";
 import { saveArtifact } from "./artifact";
 import type { Ctx } from "./context";
 import {
@@ -64,17 +64,18 @@ export async function step(
     existing.provider_job_id &&
     opts.adapter.poll
   ) {
+    const done = await pollUntilDone(
+      ctx,
+      opts.adapter,
+      existing.provider_job_id
+    );
     return await settle(
       ctx,
       existing.id,
       estUsd,
       opts,
-      await pollUntilDone(
-        ctx,
-        opts.adapter,
-        existing.provider_job_id,
-        existing.id
-      )
+      done.output,
+      done.usage
     );
   }
 
@@ -100,7 +101,14 @@ export async function step(
   try {
     const submitted = await opts.adapter.submit(opts.input);
     if (submitted.kind === "done") {
-      return await settle(ctx, stepId, estUsd, opts, submitted.output);
+      return await settle(
+        ctx,
+        stepId,
+        estUsd,
+        opts,
+        submitted.output,
+        submitted.usage
+      );
     }
     markSubmitted(db, stepId, submitted.jobId);
     if (!opts.adapter.poll) {
@@ -108,13 +116,8 @@ export async function step(
         `adapter ${opts.adapter.provider} returned a job but implements no poll()`
       );
     }
-    const output = await pollUntilDone(
-      ctx,
-      opts.adapter,
-      submitted.jobId,
-      stepId
-    );
-    return await settle(ctx, stepId, estUsd, opts, output);
+    const done = await pollUntilDone(ctx, opts.adapter, submitted.jobId);
+    return await settle(ctx, stepId, estUsd, opts, done.output, done.usage);
   } catch (err) {
     // submit failures release the reservation; poll failures stay 'submitted'
     // (the job may still finish provider-side — resumable, still reserved)
@@ -156,16 +159,15 @@ function enforceBudget(ctx: Ctx, key: string, estUsd: number): void {
 async function pollUntilDone(
   ctx: Ctx,
   adapter: Adapter,
-  jobId: string,
-  _stepId: number
-): Promise<ProviderOutput> {
+  jobId: string
+): Promise<{ output: ProviderOutput; usage?: ActualUsage }> {
   if (!adapter.poll) {
     throw new Error(`adapter ${adapter.provider} implements no poll()`);
   }
   for (;;) {
     const result = await adapter.poll(jobId);
     if (result.status === "done") {
-      return result.output;
+      return { output: result.output, usage: result.usage };
     }
     await Bun.sleep(ctx.pollIntervalMs);
   }
@@ -176,7 +178,8 @@ async function settle(
   stepId: number,
   estUsd: number,
   opts: StepOptions,
-  output: ProviderOutput
+  output: ProviderOutput,
+  usage?: ActualUsage
 ): Promise<StepResult> {
   const wantDownload = opts.download ?? true;
   const saved = wantDownload
@@ -188,17 +191,20 @@ async function settle(
       )
     : { contentType: output.contentType ?? null, path: null };
 
+  // variable-cost providers report actuals; fixed-price units confirm at the
+  // estimate. Either way the reservation is fully released here.
+  const costUsd = usage?.usdActual ?? estUsd;
   markDone(ctx.db, stepId, {
     artifactPath: saved.path,
     artifactUrl: output.url,
     contentType: saved.contentType,
-    costUsd: estUsd,
+    costUsd,
   });
 
   return {
     cached: false,
     contentType: saved.contentType ?? undefined,
-    estUsd,
+    estUsd: costUsd,
     path: saved.path ?? undefined,
     url: output.url,
   };

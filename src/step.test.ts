@@ -118,6 +118,56 @@ describe("pricing", () => {
   });
 });
 
+describe("variable cost (actuals)", () => {
+  test("adapter-reported actual cost overrides the estimate on confirm", async () => {
+    const db = mem();
+    // reserved at est 0.50 (maxCost), provider reports actual 0.12
+    const fake = fakeAdapter({
+      actualUsd: 0.12,
+      mode: "sync",
+      usdPerUnit: null,
+    });
+    const { runId } = await run(
+      "wf",
+      async (ctx) => {
+        ctx.budget(0.6);
+        await step(ctx, "gpu", { adapter: fake, input: {}, maxCost: 0.5 });
+      },
+      { db }
+    );
+    // confirmed at actual, reservation fully released
+    expect(runSpend(db, runId)).toBeCloseTo(0.12);
+    expect(getStep(db, runId, "gpu")?.cost_usd).toBeCloseTo(0.12);
+    expect(getStep(db, runId, "gpu")?.reserved_usd).toBe(0);
+  });
+
+  test("budget reserves the worst case upfront, frees headroom after confirm", async () => {
+    const db = mem();
+    const cheapActual = fakeAdapter({
+      actualUsd: 0.05,
+      mode: "sync",
+      usdPerUnit: null,
+    });
+    const fixed = fakeAdapter({ mode: "sync", usdPerUnit: 0.4 });
+    await run(
+      "wf",
+      async (ctx) => {
+        ctx.budget(0.6);
+        // reserves 0.55; after confirm only 0.05 is spent…
+        await step(ctx, "a", {
+          adapter: cheapActual,
+          input: {},
+          maxCost: 0.55,
+        });
+        // …so a 0.40 step now fits (0.05 + 0.40 <= 0.60)
+        await step(ctx, "b", { adapter: fixed, input: {} });
+      },
+      { db }
+    );
+    expect(fixed.counters.submits).toBe(1);
+  });
+});
+
 describe("async jobs + resume", () => {
   test("async step polls until done", async () => {
     const db = mem();

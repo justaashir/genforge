@@ -1,0 +1,58 @@
+{
+  "$comment": "Community-maintained price table for providers with no pricing API. Only include prices verified against the provider's published pricing page; unknown models resolve null and force an explicit maxCost. asOf = when the price was last verified.",
+  "elevenlabs": {
+    "eleven_flash_v2_5": {
+      "asOf": "2026-07",
+      "unit": "character",
+      "usdPerUnit": 0.00005
+    },
+    "eleven_multilingual_v2": {
+      "asOf": "2026-07",
+      "unit": "character",
+      "usdPerUnit": 0.0001
+    }
+  },
+  "openai": {
+    "dall-e-3": {
+      "asOf": "2026-07",
+      "note": "standard 1024x1024",
+      "unit": "image",
+      "usdPerUnit": 0.04
+    },
+    "tts-1": { "asOf": "2026-07", "unit": "character", "usdPerUnit": 0.000015 },
+    "tts-1-hd": {
+      "asOf": "2026-07",
+      "unit": "character",
+      "usdPerUnit": 0.00003
+    }
+  },
+  "replicate": {
+    "black-forest-labs/flux-1.1-pro": {
+      "asOf": "2026-07",
+      "unit": "image",
+      "usdPerUnit": 0.04
+    },
+    "black-forest-labs/flux-dev": {
+      "asOf": "2026-07",
+      "unit": "image",
+      "usdPerUnit": 0.025
+    },
+    "ideogram-ai/ideogram-v3-turbo": {
+      "asOf": "2026-07",
+      "unit": "image",
+      "usdPerUnit": 0.03
+    }
+  },
+  "stability": {
+    "stable-image-core": {
+      "asOf": "2026-07",
+      "unit": "image",
+      "usdPerUnit": 0.03
+    },
+    "stable-image-ultra": {
+      "asOf": "2026-07",
+      "unit": "image",
+      "usdPerUnit": 0.08
+    }
+  }
+}

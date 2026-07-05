@@ -13,6 +13,8 @@ export type FakeAdapterOptions = {
   failPollTimes?: number;
   /** override the output url (e.g. an http url to exercise download). */
   outputUrl?: string;
+  /** report this as the actual billed cost on completion (variable-cost providers). */
+  actualUsd?: number;
   model?: string;
 };
 
@@ -58,8 +60,12 @@ export function fakeAdapter(opts: FakeAdapterOptions = {}): FakeAdapter {
       }
       if (mode === "sync") {
         return Promise.resolve({
-          kind: "done",
+          kind: "done" as const,
           output: output(String(counters.submits)),
+          usage:
+            opts.actualUsd === undefined
+              ? undefined
+              : { usdActual: opts.actualUsd },
         });
       }
       return Promise.resolve({ jobId: `job-${counters.submits}`, kind: "job" });
@@ -74,7 +80,14 @@ export function fakeAdapter(opts: FakeAdapterOptions = {}): FakeAdapter {
       }
       counters.polls += 1;
       if (counters.polls >= pollsUntilDone) {
-        return Promise.resolve({ output: output(jobId), status: "done" });
+        return Promise.resolve({
+          output: output(jobId),
+          status: "done" as const,
+          usage:
+            opts.actualUsd === undefined
+              ? undefined
+              : { usdActual: opts.actualUsd },
+        });
       }
       return Promise.resolve({ status: "running" });
     };
