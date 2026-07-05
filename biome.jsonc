@@ -4,6 +4,11 @@
   "javascript": {
     "globals": ["Bun"]
   },
+  "files": {
+    // the review UI is a deliberately dependency-free single-file page;
+    // its inline script trades lint purity for zero build steps
+    "includes": ["!ui/index.html"]
+  },
   "linter": {
     "rules": {
       "performance": {

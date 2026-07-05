@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta content="width=device-width, initial-scale=1" name="viewport">
+    <title>genforge — review</title>
+    <style>
+    :root {
+      color-scheme: dark;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+    }
+    body {
+      max-width: 960px;
+      padding: 1.5rem;
+      margin: 0 auto;
+      font:
+        14px / 1.5 ui-monospace,
+        "SF Mono",
+        Menlo,
+        monospace;
+      color: #e8e6e3;
+      background: #0d0f12;
+    }
+    h1 {
+      font-size: 1rem;
+      color: #9aa0a6;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: 1.5rem;
+    }
+    .spend {
+      font-size: 1.4rem;
+      color: #7ee787;
+    }
+    section {
+      margin-bottom: 2rem;
+    }
+    h2 {
+      margin-bottom: 0.75rem;
+      font-size: 0.8rem;
+      color: #9aa0a6;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .gate {
+      padding: 1rem;
+      margin-bottom: 1rem;
+      background: #16191d;
+      border: 1px solid #2a2e34;
+      border-radius: 8px;
+    }
+    .gate.pending {
+      border-color: #d29922;
+    }
+    .gate-head {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 0.5rem;
+    }
+    .gate-key {
+      font-weight: 600;
+      color: #d29922;
+    }
+    .note {
+      margin: 0.5rem 0;
+      color: #9aa0a6;
+    }
+    .evidence {
+      margin: 0.5rem 0;
+      font-size: 12px;
+      color: #6e7681;
+      word-break: break-all;
+      white-space: pre-wrap;
+    }
+    .media {
+      display: block;
+      max-width: 100%;
+      max-height: 420px;
+      margin: 0.5rem 0;
+      border-radius: 6px;
+    }
+    .actions {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+    }
+    button {
+      padding: 0.45rem 1.2rem;
+      font: inherit;
+      cursor: pointer;
+      border: 1px solid transparent;
+      border-radius: 6px;
+    }
+    .keep {
+      color: #fff;
+      background: #238636;
+    }
+    .reject {
+      color: #f85149;
+      background: transparent;
+      border-color: #da3633;
+    }
+    .verdict-chip {
+      padding: 0.1rem 0.6rem;
+      font-size: 12px;
+      border-radius: 999px;
+    }
+    .verdict-keep {
+      color: #7ee787;
+      background: #1a3323;
+    }
+    .verdict-reject {
+      color: #f85149;
+      background: #3d1517;
+    }
+    table {
+      width: 100%;
+      font-size: 13px;
+      border-collapse: collapse;
+    }
+    td,
+    th {
+      padding: 0.4rem 0.6rem;
+      text-align: left;
+      border-bottom: 1px solid #21262d;
+    }
+    th {
+      font-weight: 500;
+      color: #6e7681;
+    }
+    .status-running {
+      color: #d29922;
+    }
+    .status-done {
+      color: #7ee787;
+    }
+    .status-failed,
+    .status-rejected {
+      color: #f85149;
+    }
+    .muted {
+      color: #6e7681;
+    }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>genforge</h1>
+      <div>total spend <span class="spend" id="spend">$0.00</span></div>
+    </header>
+    <section>
+      <h2>Pending review</h2>
+      <div id="pending"><p class="muted">nothing waiting on you</p></div>
+    </section>
+    <section>
+      <h2>Runs</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>run</th>
+            <th>workflow</th>
+            <th>status</th>
+            <th>steps</th>
+            <th>spent</th>
+            <th>budget</th>
+          </tr>
+        </thead>
+        <tbody id="runs"></tbody>
+      </table>
+    </section>
+    <section>
+      <h2>Decided gates</h2>
+      <div id="decided"></div>
+    </section>
+    <script>
+    "use strict";
+    const $ = (id) => document.getElementById(id);
+
+    async function refresh() {
+      const res = await fetch("/api/state");
+      const { gates, runs, totalSpend } = await res.json();
+      $("spend").textContent = "$" + totalSpend.toFixed(3);
+
+      const pending = gates.filter((g) => !g.verdict);
+      $("pending").innerHTML = pending.length
+        ? pending.map(gateCard).join("")
+        : '<p class="muted">nothing waiting on you</p>';
+
+      $("decided").innerHTML = gates
+        .filter((g) => g.verdict)
+        .slice(0, 10)
+        .map(
+          (g) => `<div class="gate"><div class="gate-head">
+        <span class="gate-key">${esc(g.key)}</span>
+        <span class="verdict-chip verdict-${g.verdict}">${g.verdict}${g.note ? " — " + esc(g.note) : ""}</span>
+      </div></div>`
+        )
+        .join("");
+
+      $("runs").innerHTML = runs
+        .map((r) => {
+          const spent = r.steps.reduce(
+            (s, x) => s + (x.cost_usd ?? x.reserved_usd),
+            0
+          );
+          return `<tr>
+        <td class="muted">${r.id.slice(0, 8)}</td>
+        <td>${esc(r.workflow)}</td>
+        <td class="status-${r.status}">${r.status}</td>
+        <td>${r.steps.filter((s) => s.status === "done").length}/${r.steps.length}</td>
+        <td>$${spent.toFixed(3)}</td>
+        <td class="muted">${r.budget_usd ? "$" + r.budget_usd.toFixed(2) : "—"}</td>
+      </tr>`;
+        })
+        .join("");
+    }
+
+    function gateCard(g) {
+      const ev = g.evidence || {};
+      const artifact = ev.artifact;
+      let media = "";
+      if (artifact && artifact.url) {
+        const src = artifact.path
+          ? `/api/artifact?run=${g.run_id}&step=${encodeURIComponent(ev.step || g.key.replace(/^approve:/, ""))}`
+          : artifact.url;
+        media = /\.(mp4|webm)($|\?)/.test(artifact.url)
+          ? `<video class="media" src="${src}" controls autoplay muted loop></video>`
+          : `<img class="media" src="${src}" alt="artifact" />`;
+      }
+      const cost =
+        ev.estUsd === undefined
+          ? ""
+          : `<span class="muted">est. $${Number(ev.estUsd).toFixed(3)}${ev.model ? " · " + esc(ev.model) : ""}</span>`;
+      return `<div class="gate pending">
+    <div class="gate-head"><span class="gate-key">${esc(g.key)}</span>${cost}</div>
+    ${ev.note ? `<p class="note">${esc(ev.note)}</p>` : ""}
+    ${media}
+    <div class="actions">
+      <button class="keep" onclick="verdict(${g.id}, 'keep')">keep</button>
+      <button class="reject" onclick="verdict(${g.id}, 'reject')">reject</button>
+    </div>
+  </div>`;
+    }
+
+    async function verdict(id, v) {
+      const note =
+        v === "reject" ? prompt("why? (optional)") || undefined : undefined;
+      await fetch(`/api/gates/${id}/verdict`, {
+        body: JSON.stringify({ note, verdict: v }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      refresh();
+    }
+
+    function esc(s) {
+      return String(s).replace(
+        /[&<>"]/g,
+        (c) => ({ '"': "&quot;", "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]
+      );
+    }
+
+    refresh();
+    setInterval(refresh, 2000);
+    </script>
+  </body>
+</html>
