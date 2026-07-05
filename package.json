@@ -1,6 +1,6 @@
 {
   "name": "genforge",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "Spend-aware durable steps for paid AI APIs — priced before it runs, recorded forever, resumable after a crash, blockable by budget or human review. Zero infra: one SQLite file.",
   "license": "MIT",
   "type": "module",
