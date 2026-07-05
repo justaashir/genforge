@@ -1,4 +1,16 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
-  "extends": ["ultracite/biome/core"]
+  "extends": ["ultracite/biome/core"],
+  "javascript": {
+    "globals": ["Bun"]
+  },
+  "linter": {
+    "rules": {
+      "performance": {
+        // this library is a polling loop by design (queue-based providers,
+        // gate verdicts) — sequential awaits in loops are the point
+        "noAwaitInLoops": "off"
+      }
+    }
+  }
 }
