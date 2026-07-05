@@ -63,14 +63,47 @@ export async function saveArtifact(
     return { contentType: knownContentType ?? null, path: null };
   }
 
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`artifact download failed: ${res.status} for ${url}`);
-  }
-  const contentType =
-    res.headers.get("content-type") ?? knownContentType ?? null;
+  // CDN downloads stall in the wild (observed: fal media, socket hangs with
+  // no bytes). The step is already settled by the time we're here, so a
+  // failed download costs nothing — timeout each attempt, retry, and buffer
+  // the body instead of streaming so a mid-body stall can't wedge the write.
+  const downloaded = await downloadWithRetry(url);
+  const contentType = downloaded.contentType ?? knownContentType ?? null;
   const path = join(dir, `step-${stepId}${guessExt(url, contentType)}`);
   mkdirSync(dir, { recursive: true });
-  await Bun.write(path, res);
+  await Bun.write(path, downloaded.body);
   return { contentType, path };
+}
+
+const DOWNLOAD_ATTEMPTS = 3;
+const DOWNLOAD_TIMEOUT_MS = 60_000;
+
+async function downloadWithRetry(
+  url: string
+): Promise<{ body: ArrayBuffer; contentType: string | null }> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= DOWNLOAD_ATTEMPTS; attempt += 1) {
+    try {
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+      });
+      if (!res.ok) {
+        // an HTTP error status won't improve on retry
+        throw new Error(`artifact download failed: ${res.status} for ${url}`);
+      }
+      // body read inside the attempt: a mid-body stall aborts + retries too
+      return {
+        body: await res.arrayBuffer(),
+        contentType: res.headers.get("content-type"),
+      };
+    } catch (err) {
+      lastErr = err;
+      if (String(err).includes("artifact download failed")) {
+        throw err;
+      }
+    }
+  }
+  throw new Error(
+    `artifact download failed after ${DOWNLOAD_ATTEMPTS} attempts for ${url}: ${String(lastErr)}`
+  );
 }
