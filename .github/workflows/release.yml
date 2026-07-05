@@ -21,7 +21,11 @@ jobs:
 
   publish:
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    # npm publishing is intentionally disabled until the library has been
+    # dogfooded on a real pipeline. To enable: change the condition back to
+    #   needs.release-please.outputs.release_created == 'true'
+    # and add an NPM_TOKEN repo secret.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
