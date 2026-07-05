@@ -35,7 +35,8 @@ export function openaiImage(
         );
       }
       const res = await fetch(`${base}/v1/images/generations`, {
-        body: JSON.stringify({ model, ...(input as Record<string, unknown>) }),
+        // model last: pricing was resolved for THIS model, input can't override it
+        body: JSON.stringify({ ...(input as Record<string, unknown>), model }),
         headers: {
           Authorization: `Bearer ${key}`,
           "Content-Type": "application/json",

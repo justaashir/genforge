@@ -54,6 +54,18 @@ export function fal(model: string, opts: FalOptions = {}): Adapter {
       const statusRes = await fetch(`${requestUrl(jobId)}/status`, {
         headers: headers(),
       });
+      if (statusRes.status === 404) {
+        // unknown to the queue: expired or never existed — polling forever won't fix it
+        throw new JobFailedError(
+          jobId,
+          "job not found or expired (status 404)"
+        );
+      }
+      if (!statusRes.ok) {
+        // auth/transport problems are transient from the ledger's view: the
+        // job may still be running provider-side
+        throw new Error(`fal status ${statusRes.status} for ${jobId}`);
+      }
       const { status } = (await statusRes.json()) as { status?: string };
       if (status !== "COMPLETED") {
         return { status: "running" };

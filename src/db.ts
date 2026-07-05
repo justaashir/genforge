@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS steps (
   units REAL NOT NULL DEFAULT 1,
   est_usd REAL NOT NULL,
   reserved_usd REAL NOT NULL DEFAULT 0, -- released on failure, zeroed when cost confirms
-  cost_usd REAL,                        -- confirmed on success
+  cost_usd REAL,                        -- confirmed on success (or billed by a terminal failure)
+  waste_usd REAL NOT NULL DEFAULT 0,    -- money billed by earlier failed attempts of this key
   provider_job_id TEXT,                 -- the crash-safe resume handle
   artifact_url TEXT,
   artifact_path TEXT,

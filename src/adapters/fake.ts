@@ -1,3 +1,4 @@
+import { JobFailedError } from "../errors";
 import type { Adapter, PollResult, SubmitResult } from "./types";
 
 export type FakeAdapterOptions = {
@@ -11,6 +12,9 @@ export type FakeAdapterOptions = {
   failSubmitTimes?: number;
   /** first N poll calls throw a transient error (simulates crash mid-poll). */
   failPollTimes?: number;
+  /** after transient failures: next N polls throw a terminal JobFailedError
+   * (carries actualUsd as billed usage when set — like Replicate failures). */
+  failPollTerminalTimes?: number;
   /** override the output url (e.g. an http url to exercise download). */
   outputUrl?: string;
   /** report this as the actual billed cost on completion (variable-cost providers). */
@@ -32,6 +36,9 @@ export function fakeAdapter(opts: FakeAdapterOptions = {}): FakeAdapter {
   const pollsUntilDone = opts.pollsUntilDone ?? 1;
   let submitFailures = opts.failSubmitTimes ?? 0;
   let pollFailures = opts.failPollTimes ?? 0;
+  let pollTerminalFailures = opts.failPollTerminalTimes ?? 0;
+  const usage = () =>
+    opts.actualUsd === undefined ? undefined : { usdActual: opts.actualUsd };
 
   const output = (id: string) => ({
     contentType: "image/png",
@@ -62,10 +69,7 @@ export function fakeAdapter(opts: FakeAdapterOptions = {}): FakeAdapter {
         return Promise.resolve({
           kind: "done" as const,
           output: output(String(counters.submits)),
-          usage:
-            opts.actualUsd === undefined
-              ? undefined
-              : { usdActual: opts.actualUsd },
+          usage: usage(),
         });
       }
       return Promise.resolve({ jobId: `job-${counters.submits}`, kind: "job" });
@@ -78,15 +82,18 @@ export function fakeAdapter(opts: FakeAdapterOptions = {}): FakeAdapter {
         pollFailures -= 1;
         return Promise.reject(new Error("poll failed"));
       }
+      if (pollTerminalFailures > 0) {
+        pollTerminalFailures -= 1;
+        return Promise.reject(
+          new JobFailedError(jobId, "job failed terminally", usage())
+        );
+      }
       counters.polls += 1;
       if (counters.polls >= pollsUntilDone) {
         return Promise.resolve({
           output: output(jobId),
           status: "done" as const,
-          usage:
-            opts.actualUsd === undefined
-              ? undefined
-              : { usdActual: opts.actualUsd },
+          usage: usage(),
         });
       }
       return Promise.resolve({ status: "running" });

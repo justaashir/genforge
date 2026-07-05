@@ -68,9 +68,12 @@ function resolveRunId(
     return opts.runId;
   }
   if (!opts.fresh) {
+    // 'rejected' is deliberately excluded: a human said no, and the verdict is
+    // sticky — auto-resuming would just rethrow forever. Resume a rejected run
+    // explicitly by runId (after clearing the gate) if that's really wanted.
     const incomplete = db
       .query(
-        `SELECT id FROM runs WHERE workflow = ? AND status != 'done'
+        `SELECT id FROM runs WHERE workflow = ? AND status NOT IN ('done', 'rejected')
          ORDER BY created_at DESC, rowid DESC LIMIT 1`
       )
       .get(workflow) as { id: string } | null;

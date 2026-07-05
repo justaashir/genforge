@@ -1,3 +1,5 @@
+import type { ActualUsage } from "./adapters/types";
+
 /** Step estimate would push the run past its budget ceiling. Nothing was submitted. */
 export class BudgetExceededError extends Error {
   constructor(
@@ -47,11 +49,16 @@ export class GateTimeoutError extends Error {
   }
 }
 
-/** The provider reported the job itself failed (terminal, not a transient poll error). */
+/**
+ * The provider reported the job itself failed (terminal, not a transient poll
+ * error). Some providers bill failed jobs anyway (Replicate charges GPU time)
+ * — usage carries that actual cost so the ledger records it.
+ */
 export class JobFailedError extends Error {
   constructor(
     readonly jobId: string,
-    detail: string
+    detail: string,
+    readonly usage?: ActualUsage
   ) {
     super(`provider job ${jobId} failed: ${detail}`);
     this.name = "JobFailedError";

@@ -158,6 +158,29 @@ describe("fal adapter edges", () => {
     }
   });
 
+  test("status 404 is terminal (job expired); other status errors are transient", async () => {
+    let statusCode = 404;
+    const server = Bun.serve({
+      fetch: () => new Response("err", { status: statusCode }),
+      port: 0,
+    });
+    const base = `http://localhost:${server.port}`;
+    const adapter = fal("fal-ai/x/y", {
+      apiBaseUrl: base,
+      apiKey: "k",
+      queueBaseUrl: base,
+    });
+    try {
+      await expect(adapter.poll?.("gone")).rejects.toThrow(JobFailedError);
+      statusCode = 401;
+      const transient = adapter.poll?.("gone").catch((e: unknown) => e);
+      expect(await transient).not.toBeInstanceOf(JobFailedError);
+      expect(String(await transient)).toContain("fal status 401");
+    } finally {
+      server.stop(true);
+    }
+  });
+
   test("images[] result shape is extracted; missing file is terminal", async () => {
     let payload: Record<string, unknown> = {
       images: [{ content_type: "image/png", url: "https://cdn/x.png" }],

@@ -51,7 +51,12 @@ surprise bill:
 3. **Crash-safe resume.** Steps are memoized by `(run, key)`. Completed steps
    replay free from the ledger; an in-flight async job re-attaches by its
    provider request id. Kill -9 mid-generation and re-run: **money is spent
-   exactly once** (that's an integration test, not a promise).
+   exactly once** (that's an integration test, not a promise). One honest
+   caveat: a crash in the instant between the provider accepting a submit
+   and the jobId reaching disk re-submits on resume — closing it needs
+   provider-side idempotency keys, which none of these APIs offer. Sync
+   providers (one request, no jobId) share the same window for the request
+   itself.
 4. **Human review as a pipeline primitive.** `gate()` blocks until you click
    keep/reject in a local UI — with the artifact, the note, and the cost in
    front of you. Timeouts never auto-approve. Expensive steps can require

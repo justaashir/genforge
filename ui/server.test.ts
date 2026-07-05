@@ -60,6 +60,20 @@ describe("review UI server", () => {
     expect(state.totalSpend).toBeCloseTo(0.2);
   });
 
+  test("cross-origin requests are refused — a webpage can't CSRF a keep verdict", async () => {
+    const res = await fetch(`${base}/api/gates/1/verdict`, {
+      body: JSON.stringify({ verdict: "keep" }),
+      headers: { origin: "http://evil.example" },
+      method: "POST",
+    });
+    expect(res.status).toBe(403);
+    // localhost origins (the UI itself) still pass
+    const ok = await fetch(`${base}/api/state`, {
+      headers: { origin: `http://localhost:${server.port}` },
+    });
+    expect(ok.status).toBe(200);
+  });
+
   test("rejects a malformed verdict", async () => {
     const res = await fetch(`${base}/api/gates/1/verdict`, {
       body: JSON.stringify({ verdict: "maybe" }),

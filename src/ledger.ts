@@ -12,6 +12,7 @@ export type StepRow = {
   est_usd: number;
   reserved_usd: number;
   cost_usd: number | null;
+  waste_usd: number;
   provider_job_id: string | null;
   artifact_url: string | null;
   artifact_path: string | null;
@@ -74,6 +75,7 @@ export function insertStep(
          status = 'pending', provider = excluded.provider, model = excluded.model,
          input_json = excluded.input_json, units = excluded.units,
          est_usd = excluded.est_usd, reserved_usd = excluded.reserved_usd,
+         waste_usd = waste_usd + COALESCE(cost_usd, 0),
          cost_usd = NULL, provider_job_id = NULL, error = NULL, completed_at = NULL
        RETURNING id`
     )
@@ -100,36 +102,56 @@ export function markSubmitted(
   ).run(jobId, stepId);
 }
 
+/**
+ * Confirm cost + provider url the moment the provider reports done — BEFORE
+ * any artifact download, so a failed download can never erase spent money.
+ * The local path lands later via setArtifact.
+ */
 export function markDone(
   db: Database,
   stepId: number,
   fields: {
     costUsd: number;
     artifactUrl: string;
-    artifactPath: string | null;
     contentType: string | null;
   }
 ): void {
   db.query(
     `UPDATE steps SET status = 'done', cost_usd = ?, reserved_usd = 0,
-       artifact_url = ?, artifact_path = ?, content_type = ?,
+       artifact_url = ?, content_type = ?,
        completed_at = datetime('now')
      WHERE id = ?`
-  ).run(
-    fields.costUsd,
-    fields.artifactUrl,
-    fields.artifactPath,
-    fields.contentType,
-    stepId
-  );
+  ).run(fields.costUsd, fields.artifactUrl, fields.contentType, stepId);
 }
 
-export function markFailed(db: Database, stepId: number, error: string): void {
+/** Record where a done step's artifact landed on disk. */
+export function setArtifact(
+  db: Database,
+  stepId: number,
+  path: string | null,
+  contentType: string | null
+): void {
   db.query(
-    `UPDATE steps SET status = 'failed', reserved_usd = 0, error = ?,
+    "UPDATE steps SET artifact_path = ?, content_type = COALESCE(?, content_type) WHERE id = ?"
+  ).run(path, contentType, stepId);
+}
+
+/**
+ * Release the reservation on a terminal failure. Some providers still bill
+ * failed jobs (Replicate charges GPU time) — pass costUsd so the ledger keeps
+ * counting that money; a later re-run moves it into waste_usd.
+ */
+export function markFailed(
+  db: Database,
+  stepId: number,
+  error: string,
+  costUsd?: number
+): void {
+  db.query(
+    `UPDATE steps SET status = 'failed', reserved_usd = 0, cost_usd = ?, error = ?,
        completed_at = datetime('now')
      WHERE id = ?`
-  ).run(error, stepId);
+  ).run(costUsd ?? null, error, stepId);
 }
 
 export function listSteps(db: Database, runId?: string): StepRow[] {
@@ -143,21 +165,24 @@ export function listSteps(db: Database, runId?: string): StepRow[] {
 
 // -- spend ---------------------------------------------------------------
 
-/** Confirmed cost + live reservations for one run. The budget check reads this. */
+/**
+ * Confirmed cost + live reservations + money billed by failed attempts
+ * (waste), for one run. The budget check reads this.
+ */
 export function runSpend(db: Database, runId: string): number {
   const row = db
     .query(
-      "SELECT COALESCE(SUM(COALESCE(cost_usd, 0) + reserved_usd), 0) AS total FROM steps WHERE run_id = ?"
+      "SELECT COALESCE(SUM(COALESCE(cost_usd, 0) + reserved_usd + waste_usd), 0) AS total FROM steps WHERE run_id = ?"
     )
     .get(runId) as { total: number };
   return row.total;
 }
 
-/** Confirmed cost + live reservations across every run in the ledger. */
+/** Same sum across every run in the ledger. */
 export function totalSpend(db: Database): number {
   const row = db
     .query(
-      "SELECT COALESCE(SUM(COALESCE(cost_usd, 0) + reserved_usd), 0) AS total FROM steps"
+      "SELECT COALESCE(SUM(COALESCE(cost_usd, 0) + reserved_usd + waste_usd), 0) AS total FROM steps"
     )
     .get() as { total: number };
   return row.total;

@@ -1,5 +1,8 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
+import { GateRejectedError } from "./errors";
+import { gate } from "./gate";
+import { listGates, setGateVerdict } from "./ledger";
 import { run } from "./run";
 
 const mem = () => new Database(":memory:");
@@ -53,6 +56,30 @@ describe("run lifecycle + resume semantics", () => {
       status: string;
     }>;
     expect(statuses.find((r) => r.id === runId)?.status).toBe("done");
+  });
+
+  test("a rejected run is NOT auto-resumed — the sticky verdict can't brick the workflow", async () => {
+    const db = mem();
+    const first = run("wf", (ctx) => gate(ctx, "review"), {
+      db,
+      pollIntervalMs: 1,
+    });
+    for (let i = 0; i < 500 && listGates(db).length === 0; i += 1) {
+      await Bun.sleep(2);
+    }
+    const [g] = listGates(db);
+    if (!g) {
+      throw new Error("gate never appeared");
+    }
+    setGateVerdict(db, g.id, "reject");
+    await expect(first).rejects.toThrow(GateRejectedError);
+    const { id: rejectedId } = db.query("SELECT id FROM runs").get() as {
+      id: string;
+    };
+
+    // the next default invocation starts fresh instead of rethrowing forever
+    const { runId } = await run("wf", () => Promise.resolve("ok"), { db });
+    expect(runId).not.toBe(rejectedId);
   });
 
   test("different workflows never share runs", async () => {

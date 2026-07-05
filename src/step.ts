@@ -16,6 +16,7 @@ import {
   markSubmitted,
   runSpend,
   type StepRow,
+  setArtifact,
 } from "./ledger";
 
 export type StepOptions = {
@@ -35,7 +36,8 @@ export type StepResult = {
   url: string;
   path?: string;
   contentType?: string;
-  estUsd: number;
+  /** Confirmed cost once the provider reports done; the reserved estimate before that. */
+  costUsd: number;
   /** True when this call was answered from the ledger without touching the provider. */
   cached: boolean;
 };
@@ -43,7 +45,9 @@ export type StepResult = {
 /**
  * One durable, priced provider call. Memoized by (runId, key): done steps
  * return from the ledger, in-flight async jobs re-attach by jobId, failed
- * steps re-run. Money is reserved before submit and confirmed or released after.
+ * steps re-run. Money is reserved before submit and confirmed or released
+ * after. (The `approve:` gate-key prefix is reserved for approveOver gates —
+ * don't reuse it for your own gate() keys.)
  */
 export async function step(
   ctx: Ctx,
@@ -53,32 +57,20 @@ export async function step(
   const { db } = ctx;
   const existing = getStep(db, ctx.runId, key);
   if (existing?.status === "done") {
-    return fromRow(existing, true);
+    return await replay(ctx, existing, opts);
   }
 
-  const estUsd = await resolveEstimate(ctx, key, opts);
-
-  // crash-safe resume: submitted + jobId → re-attach, never resubmit
+  // crash-safe resume: submitted + jobId → re-attach, never resubmit.
+  // No pricing here — the money was already committed at existing.est_usd.
   if (
     existing?.status === "submitted" &&
     existing.provider_job_id &&
     opts.adapter.poll
   ) {
-    const done = await pollUntilDone(
-      ctx,
-      opts.adapter,
-      existing.provider_job_id
-    );
-    return await settle(
-      ctx,
-      existing.id,
-      estUsd,
-      opts,
-      done.output,
-      done.usage
-    );
+    return await attach(ctx, existing, existing.provider_job_id, opts);
   }
 
+  const estUsd = await resolveEstimate(ctx, key, opts);
   enforceBudget(ctx, key, estUsd);
 
   if (opts.approveOver !== undefined && estUsd > opts.approveOver) {
@@ -86,6 +78,8 @@ export async function step(
       evidence: { estUsd, model: opts.adapter.model, step: key },
       note: `est. $${estUsd.toFixed(2)} exceeds the $${opts.approveOver.toFixed(2)} approval threshold`,
     });
+    // the wait may have lasted hours — whatever spent meanwhile counts again
+    enforceBudget(ctx, key, estUsd);
   }
 
   const stepId = insertStep(db, {
@@ -119,11 +113,82 @@ export async function step(
     const done = await pollUntilDone(ctx, opts.adapter, submitted.jobId);
     return await settle(ctx, stepId, estUsd, opts, done.output, done.usage);
   } catch (err) {
-    // submit failures release the reservation; poll failures stay 'submitted'
-    // (the job may still finish provider-side — resumable, still reserved)
+    // submit failures release the reservation; transient poll failures stay
+    // 'submitted' (the job may still finish provider-side — resumable, still
+    // reserved). A step already marked done keeps its money truth: an artifact
+    // download error after that is retried free on the next run.
     const row = getStep(db, ctx.runId, key);
-    if (row && (row.status === "pending" || err instanceof JobFailedError)) {
-      markFailed(db, row.id, String(err));
+    if (
+      row &&
+      row.status !== "done" &&
+      (row.status === "pending" || err instanceof JobFailedError)
+    ) {
+      markFailed(db, row.id, String(err), failureCost(err));
+    }
+    throw err;
+  }
+}
+
+/** Terminal job failures can still have billed (Replicate charges GPU time). */
+function failureCost(err: unknown): number | undefined {
+  return err instanceof JobFailedError ? err.usage?.usdActual : undefined;
+}
+
+/**
+ * A done step answered from the ledger. If the artifact was never downloaded
+ * (download:false earlier, or a failed download after the money was recorded),
+ * this call's download preference gets one more chance — for free.
+ */
+async function replay(
+  ctx: Ctx,
+  row: StepRow,
+  opts: StepOptions
+): Promise<StepResult> {
+  const wantDownload = opts.download ?? true;
+  if (wantDownload && !row.artifact_path && row.artifact_url) {
+    const saved = await saveArtifact(
+      row.artifact_url,
+      ctx.artifactsDir,
+      row.id,
+      row.content_type ?? undefined
+    );
+    if (saved.path) {
+      setArtifact(ctx.db, row.id, saved.path, saved.contentType);
+      return fromRow(
+        {
+          ...row,
+          artifact_path: saved.path,
+          content_type: saved.contentType ?? row.content_type,
+        },
+        true
+      );
+    }
+  }
+  return fromRow(row, true);
+}
+
+/** Resume an in-flight job by its provider jobId — never a second submit. */
+async function attach(
+  ctx: Ctx,
+  row: StepRow,
+  jobId: string,
+  opts: StepOptions
+): Promise<StepResult> {
+  try {
+    const done = await pollUntilDone(ctx, opts.adapter, jobId);
+    return await settle(
+      ctx,
+      row.id,
+      row.est_usd,
+      opts,
+      done.output,
+      done.usage
+    );
+  } catch (err) {
+    // terminal provider failure → failed (re-runnable, reservation released);
+    // anything else is transient — stay 'submitted' and resumable
+    if (err instanceof JobFailedError) {
+      markFailed(ctx.db, row.id, String(err), err.usage?.usdActual);
     }
     throw err;
   }
@@ -181,30 +246,38 @@ async function settle(
   output: ProviderOutput,
   usage?: ActualUsage
 ): Promise<StepResult> {
-  const wantDownload = opts.download ?? true;
-  const saved = wantDownload
-    ? await saveArtifact(
-        output.url,
-        ctx.artifactsDir,
-        stepId,
-        output.contentType
-      )
-    : { contentType: output.contentType ?? null, path: null };
-
-  // variable-cost providers report actuals; fixed-price units confirm at the
-  // estimate. Either way the reservation is fully released here.
+  // money truth first: the provider has billed by now, so the confirmed cost
+  // is recorded BEFORE any download can fail. Variable-cost providers report
+  // actuals; fixed-price units confirm at the estimate. Either way the
+  // reservation is fully released here.
   const costUsd = usage?.usdActual ?? estUsd;
   markDone(ctx.db, stepId, {
-    artifactPath: saved.path,
     artifactUrl: output.url,
-    contentType: saved.contentType,
+    contentType: output.contentType ?? null,
     costUsd,
   });
 
+  if (!(opts.download ?? true)) {
+    return {
+      cached: false,
+      contentType: output.contentType,
+      costUsd,
+      url: output.url,
+    };
+  }
+
+  const saved = await saveArtifact(
+    output.url,
+    ctx.artifactsDir,
+    stepId,
+    output.contentType
+  );
+  const contentType = saved.contentType ?? output.contentType ?? null;
+  setArtifact(ctx.db, stepId, saved.path, contentType);
   return {
     cached: false,
-    contentType: saved.contentType ?? undefined,
-    estUsd: costUsd,
+    contentType: contentType ?? undefined,
+    costUsd,
     path: saved.path ?? undefined,
     url: output.url,
   };
@@ -214,7 +287,7 @@ function fromRow(row: StepRow, cached: boolean): StepResult {
   return {
     cached,
     contentType: row.content_type ?? undefined,
-    estUsd: row.cost_usd ?? row.est_usd,
+    costUsd: row.cost_usd ?? row.est_usd,
     path: row.artifact_path ?? undefined,
     url: row.artifact_url ?? "",
   };
