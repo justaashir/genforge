@@ -3,6 +3,8 @@
   "packages": {
     ".": {
       "release-type": "node",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true,
       "changelog-sections": [
         { "section": "Features", "type": "feat" },
         { "section": "Bug Fixes", "type": "fix" },
