@@ -17,8 +17,7 @@ jobs:
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
-        with:
-          release-type: node
+        # manifest mode: reads release-please-config.json + .release-please-manifest.json
 
   publish:
     needs: release-please
